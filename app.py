@@ -3,6 +3,9 @@ import bcrypt
 import hashlib
 import subprocess
 import time
+from argon2 import PasswordHasher
+
+ph = PasswordHasher()
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
@@ -42,19 +45,16 @@ HTML_TEMPLATE = '''
             flex-direction: column;
             gap: 15px;
         }
-        input[type="text"], input[type="password"] {
+        input, select {
             padding: 10px;
             font-size: 14px;
             border: 1px solid #ccc;
             border-radius: 5px;
         }
         input[type="submit"] {
-            padding: 10px;
             background: #4CAF50;
-            border: none;
             color: white;
             font-weight: bold;
-            border-radius: 5px;
             cursor: pointer;
         }
         a {
@@ -81,6 +81,14 @@ HTML_TEMPLATE = '''
             <input type="text" name="username" required>
             <label>Password:</label>
             <input type="password" name="password" required>
+            <label>Choose Hashing Algorithm:</label>
+            <select name="algorithm" required>
+                <option value="bcrypt">Bcrypt</option>
+                <option value="md5">MD5</option>
+                <option value="sha1">SHA-1</option>
+                <option value="sha256">SHA-256</option>
+                <option value="argon2">Argon2</option>
+            </select>
             <input type="submit" value="Register">
         </form>
         <a href="/">Back to Home</a>
@@ -101,41 +109,48 @@ def register():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
+        algorithm = request.form['algorithm']
         password_bytes = password.encode('utf-8')
 
         if username in users:
             flash("Username already exists.")
             return redirect(url_for('register'))
 
-        # Hash with bcrypt
-        salt = bcrypt.gensalt()
-        hashed_bcrypt = bcrypt.hashpw(password_bytes, salt)
-        users[username] = hashed_bcrypt
+        # Hash password based on chosen algorithm
+        if algorithm == "bcrypt":
+            salt = bcrypt.gensalt()
+            hashed = bcrypt.hashpw(password_bytes, salt).decode()
+        elif algorithm == "md5":
+            hashed = hashlib.md5(password_bytes).hexdigest()
+        elif algorithm == "sha1":
+            hashed = hashlib.sha1(password_bytes).hexdigest()
+        elif algorithm == "sha256":
+            hashed = hashlib.sha256(password_bytes).hexdigest()
+        elif algorithm == "argon2":
+            hashed = ph.hash(password)
 
-        # Also create an MD5 hash to test cracking
-        md5_hash = hashlib.md5(password_bytes).hexdigest()
-        with open('hashes.txt', 'w') as f:
-            f.write(md5_hash + '\n')
+        users[username] = {"hash": hashed, "algorithm": algorithm}
 
-        # Try running Hashcat on the hash with a wordlist
-        try:
-            start_time = time.time()
-            result = subprocess.run(
-                ['hashcat', '-a', '0', '-m', '0', 'hashes.txt', '/Users/stanleyshen/Unhashed_pass/rockyou.txt', '--quiet', '--show'],
-                capture_output=True,
-                text=True
-            )
-            duration = time.time() - start_time
+        # If hash is MD5, try cracking with Hashcat + rockyou.txt
+        if algorithm == "md5":
+            with open('hashes.txt', 'w') as f:
+                f.write(hashed + '\n')
+            try:
+                start_time = time.time()
+                result = subprocess.run(
+                    ['hashcat', '-a', '0', '-m', '0', 'hashes.txt', '/Users/stanleyshen/Unhashed_pass/rockyou.txt', '--quiet', '--show'],
+                    capture_output=True,
+                    text=True
+                )
+                duration = time.time() - start_time
+                if result.stdout.strip():
+                    flash(f"Password cracked in {duration:.2f} seconds using dictionary attack.")
+                else:
+                    flash("Password not found in rockyou.txt.")
+            except Exception as e:
+                flash(f"Error running Hashcat: {e}")
 
-            if result.stdout.strip():
-                flash(f"Password cracked in {duration:.2f} seconds using dictionary attack.")
-            else:
-                flash("Password not found in dictionary (rockyou.txt).")
-
-        except Exception as e:
-            flash(f"Error running Hashcat: {e}")
-
-        flash("Registered successfully!")
+        flash(f"Password hashed using {algorithm.upper()} successfully!")
         return redirect(url_for('register'))
 
     return render_template_string(HTML_TEMPLATE)
