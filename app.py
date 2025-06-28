@@ -116,7 +116,6 @@ def register():
             flash("Username already exists.")
             return redirect(url_for('register'))
 
-        # Hash password based on chosen algorithm
         if algorithm == "bcrypt":
             salt = bcrypt.gensalt()
             hashed = bcrypt.hashpw(password_bytes, salt).decode()
@@ -131,7 +130,6 @@ def register():
 
         users[username] = {"hash": hashed, "algorithm": algorithm}
 
-        # If hash is MD5, try cracking with Hashcat + rockyou.txt
         if algorithm == "md5":
             with open('hashes.txt', 'w') as f:
                 f.write(hashed + '\n')
